@@ -1,0 +1,10 @@
+{
+  "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+  "cmake.configureOnOpen": false,
+  "sonarlint.pathToCompileCommands": "${workspaceFolder}/build/compile_commands.json",
+  "files.associations": {
+    "*.ejs": "html",
+    "pcap.h": "c",
+    "pcap-stdinc.h": "c"
+  }
+}
