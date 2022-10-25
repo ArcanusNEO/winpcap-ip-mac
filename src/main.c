@@ -84,8 +84,7 @@ signed main(int argc, char* argv[]) {
   const u_char*       pkt_data;
   /* Retrieve the packets */
   while ((res = pcap_next_ex(adhandle, &header, &pkt_data)) >= 0) {
-    if (res == 0) /* Timeout elapsed */
-      continue;
+    if (res == 0) continue; /* Timeout elapsed */
 
     /* convert the timestamp to readable format */
     time_t     local_tv_sec = header->ts.tv_sec;
