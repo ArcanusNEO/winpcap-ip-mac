@@ -7,26 +7,26 @@
 
 #include "pcap.h"
 
-signed main(int argc, char* argv[]) {
-  pcap_if_t*          alldevs;
-  pcap_if_t*          d;
-  int                 inum;
-  int                 i = 0;
-  pcap_t*             adhandle;
-  int                 res;
-  char                errbuf[PCAP_ERRBUF_SIZE];
-  struct tm*          ltime;
-  char                timestr[16];
-  struct pcap_pkthdr* header;
-  const u_char*       pkt_data;
-  time_t              local_tv_sec;
+typedef struct {
+  u_char byte[6];
+} mac_t;
+typedef struct {
+  mac_t     daddr;
+  mac_t     saddr;
+  u_int16_t type;
+} etherheader_t;
 
+signed main(int argc, char* argv[]) {
+  static char errbuf[PCAP_ERRBUF_SIZE];
+  pcap_if_t*  alldevs;
   /* Retrieve the device list */
   if (pcap_findalldevs(&alldevs, errbuf) == -1) {
     fprintf(stderr, "Error in pcap_findalldevs: %s\n", errbuf);
     return -1;
   }
 
+  pcap_if_t* d;
+  int        i = 0;
   /* Print the list */
   for (d = alldevs; d; d = d->next) {
     printf("%d. %s", ++i, d->name);
@@ -40,6 +40,7 @@ signed main(int argc, char* argv[]) {
   }
 
   printf("Enter the interface number (1-%d):", i);
+  int inum;
   scanf("%d", &inum);
 
   if (inum < 1 || inum > i) {
@@ -53,6 +54,7 @@ signed main(int argc, char* argv[]) {
   for (d = alldevs, i = 0; i < inum - 1; d = d->next, i++)
     ;
 
+  pcap_t* adhandle;
   /* Open the adapter */
   if ((adhandle =
          pcap_open_live(d->name,  // name of the device
@@ -77,17 +79,32 @@ signed main(int argc, char* argv[]) {
   /* At this point, we don't need any more the device list. Free it */
   pcap_freealldevs(alldevs);
 
+  int                 res;
+  struct pcap_pkthdr* header;
+  const u_char*       pkt_data;
   /* Retrieve the packets */
   while ((res = pcap_next_ex(adhandle, &header, &pkt_data)) >= 0) {
     if (res == 0) /* Timeout elapsed */
       continue;
 
     /* convert the timestamp to readable format */
-    local_tv_sec = header->ts.tv_sec;
-    ltime        = localtime(&local_tv_sec);
+    time_t     local_tv_sec = header->ts.tv_sec;
+    struct tm* ltime        = localtime(&local_tv_sec);
+    char       timestr[16];
     strftime(timestr, sizeof timestr, "%H:%M:%S", ltime);
 
-    printf("%s,%.6d len:%d\n", timestr, header->ts.tv_usec, header->len);
+    printf("[Timestamp] %s,%.6d\n", timestr, header->ts.tv_usec);
+    printf("[Capture length] %u\n", header->caplen);
+    printf("[Total length] %u\n", header->len);
+    const etherheader_t* eh = pkt_data;
+    printf("[Source MAC] %x:%x:%x:%x:%x:%x\n", eh->saddr.byte[0],
+           eh->saddr.byte[1], eh->saddr.byte[2], eh->saddr.byte[3],
+           eh->saddr.byte[4], eh->saddr.byte[5]);
+    printf("[Destination MAC] %x:%x:%x:%x:%x:%x\n", eh->daddr.byte[0],
+           eh->daddr.byte[1], eh->daddr.byte[2], eh->daddr.byte[3],
+           eh->daddr.byte[4], eh->daddr.byte[5]);
+    printf("[EtherType] 0x%04hx\n", ntohs(eh->type));
+    puts("--------");
   }
 
   if (res == -1) {
