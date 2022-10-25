@@ -1,1 +1,1 @@
-# wine-cmake-demo
+# Capture Ethernet packet by WinPcap
