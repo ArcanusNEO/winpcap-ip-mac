@@ -7,7 +7,7 @@
 
 #include "pcap.h"
 
-signed main() {
+signed main(int argc, char* argv[]) {
   pcap_if_t*          alldevs;
   pcap_if_t*          d;
   int                 inum;
