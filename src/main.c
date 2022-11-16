@@ -2,6 +2,9 @@
 #include <stdlib.h>
 #include <tchar.h>
 #include <time.h>
+
+#include <winsock2.h>
+
 #include <windows.h>
 #include <winnt.h>
 
@@ -12,13 +15,13 @@ typedef struct {
 } __attribute__((packed)) mac_t;
 
 typedef struct {
-  mac_t    daddr;
-  mac_t    saddr;
-  uint16_t type;
+  mac_t    dst_mac;
+  mac_t    src_mac;
+  uint16_t ether_type;
 } __attribute__((packed)) etherheader_t;
 
 typedef struct {
-  etherheader_t eth;
+  etherheader_t etherheader;
   uint16_t      htype;
   uint16_t      ptype;
   uint8_t       maclen;
@@ -30,10 +33,37 @@ typedef struct {
   uint32_t      dst_ip;
 } __attribute__((packed)) arpframe_t;
 
+mac_t capmac(pcap_t* adhandle, uint32_t src_ip) {
+  mac_t ret = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+
+  struct pcap_pkthdr* header;
+
+  int      res;
+  uint8_t* pkt_data;
+
+  while ((res = pcap_next_ex(adhandle, &header, &pkt_data)) >= 0) {
+    if (res == 0) continue;  // Timeout elapsed
+    arpframe_t* ippacket = pkt_data;
+    if (ntohs(ippacket->etherheader.ether_type) == 0x806
+        && ntohs(ippacket->op) == 0x0002 && ippacket->src_ip == src_ip) {
+      memcpy(&ret, &ippacket->etherheader.src_mac, sizeof(mac_t));
+      break;
+    }
+  }
+  return ret;
+}
+
+#define printmac(mac)                                                   \
+  printf("%02x:%02x:%02x:%02x:%02x:%02x", (mac).byte[0], (mac).byte[1], \
+         (mac).byte[2], (mac).byte[3], (mac).byte[4], (mac).byte[5])
+
+#define MX_IP_SZ     16
+#define MX_IP_SZ_FMT "15"
+
 signed main(int argc, char* argv[]) {
   static char errbuf[PCAP_ERRBUF_SIZE];
   pcap_if_t*  alldevs;
-  /* Retrieve the device list */
+  // Retrieve the device list
   if (pcap_findalldevs(&alldevs, errbuf) == -1) {
     fprintf(stderr, "Error in pcap_findalldevs: %s\n", errbuf);
     return -1;
@@ -41,11 +71,16 @@ signed main(int argc, char* argv[]) {
 
   pcap_if_t* d;
   int        i = 0;
-  /* Print the list */
+  // Print the list
   for (d = alldevs; d; d = d->next) {
     printf("%d. %s", ++i, d->name);
-    if (d->description) printf(" (%s)\n", d->description);
-    else printf(" (No description available)\n");
+    if (d->description) printf(" (%s) ", d->description);
+    else printf(" (N/A) ");
+    for (pcap_addr_t* a = d->addresses; a != NULL; a = a->next)
+      if (((struct sockaddr_in*) a->addr)->sin_family == AF_INET && a->addr)
+        printf("%c%s", " ("[a == d->addresses],
+               inet_ntoa(((struct sockaddr_in*) a->addr)->sin_addr));
+    puts(")");
   }
 
   if (i == 0) {
@@ -53,68 +88,84 @@ signed main(int argc, char* argv[]) {
     return -1;
   }
 
-  printf("Enter the interface number (1-%d):", i);
+  printf("Enter the interface number (1-%d): ", i);
   int inum;
   scanf("%d", &inum);
 
   if (inum < 1 || inum > i) {
     printf("\nInterface number out of range.\n");
-    /* Free the device list */
+    // Free the device list
     pcap_freealldevs(alldevs);
     return -1;
   }
 
-  /* Jump to the selected adapter */
-  for (d = alldevs, i = 0; i < inum - 1; d = d->next, ++i)
-    ;
+  // Jump to the selected adapter
+  for (d = alldevs, i = 0; i < inum - 1; d = d->next, ++i) { }
 
   pcap_t* adhandle;
-  /* Open the adapter */
+  // Open the adapter
   if ((adhandle = pcap_open_live(d->name, 65536, 1, 1000, errbuf)) == NULL) {
     fprintf(stderr,
             "\nUnable to open the adapter. %s is not supported by WinPcap\n",
             d->name);
-    /* Free the device list */
+    // Free the device list
     pcap_freealldevs(alldevs);
     return -1;
   }
 
-  printf("\nlistening on %s...\n", d->description);
+  char self_ip[MX_IP_SZ];
+  for (pcap_addr_t* a = d->addresses; a != NULL; a = a->next)
+    if (((struct sockaddr_in*) a->addr)->sin_family == AF_INET && a->addr) {
+      strcpy(self_ip, inet_ntoa(((struct sockaddr_in*) a->addr)->sin_addr));
+      break;
+    }
 
-  /* At this point, we don't need any more the device list. Free it */
+  printf("\nListening on %s (%s)...\n", d->description, self_ip);
+
+  // At this point, we don't need any more the device list. Free it
   pcap_freealldevs(alldevs);
 
-  int                 res;
-  struct pcap_pkthdr* header;
-  const uint8_t*      pkt_data;
-  /* Retrieve the packets */
-  while ((res = pcap_next_ex(adhandle, &header, &pkt_data)) >= 0) {
-    if (res == 0) continue; /* Timeout elapsed */
+  printf("Enter IP: ");
+  char query_ip[MX_IP_SZ];
+  scanf("%" MX_IP_SZ_FMT "s", query_ip);
 
-    /* convert the timestamp to readable format */
-    time_t     local_tv_sec = header->ts.tv_sec;
-    struct tm* ltime        = localtime(&local_tv_sec);
-    char       timestr[16];
-    strftime(timestr, sizeof timestr, "%H:%M:%S", ltime);
+  arpframe_t arpframe = {
+    .etherheader = {.dst_mac    = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
+                    .src_mac    = 0,
+                    .ether_type = htons(0x806)}, // 帧类型为ARP
+    .htype       = htons(0x0001), // 硬件类型为以太网
+    .ptype       = htons(0x0800), // 协议类型为IP
+    .maclen      = 6, // 硬件地址长度为6
+    .iplen       = 4, // 协议地址长为4
+    .op          = htons(0x0001), // 操作为ARP请求
+    .src_mac     = 0,
+    .src_ip      = 0,
+    .dst_mac     = 0,
+    .dst_ip      = inet_addr(self_ip)
+  };
 
-    printf("[Timestamp] %s,%.6d\n", timestr, header->ts.tv_usec);
-    printf("[Capture length] %u\n", header->caplen);
-    printf("[Total length] %u\n", header->len);
-    const etherheader_t* eh = pkt_data;
-    printf("[Source MAC] %x:%x:%x:%x:%x:%x\n", eh->saddr.byte[0],
-           eh->saddr.byte[1], eh->saddr.byte[2], eh->saddr.byte[3],
-           eh->saddr.byte[4], eh->saddr.byte[5]);
-    printf("[Destination MAC] %x:%x:%x:%x:%x:%x\n", eh->daddr.byte[0],
-           eh->daddr.byte[1], eh->daddr.byte[2], eh->daddr.byte[3],
-           eh->daddr.byte[4], eh->daddr.byte[5]);
-    printf("[EtherType] 0x%04hx\n", ntohs(eh->type));
-    puts("--------");
+  printf("\nQuerying...\n");
+
+  pcap_sendpacket(adhandle, &arpframe, sizeof(arpframe_t));
+  mac_t self_mac = capmac(adhandle, arpframe.dst_ip);
+
+  printf("\nSelf MAC Address: ");
+  printmac(self_mac);
+  puts("");
+
+  mac_t mac = self_mac;
+
+  if (strcmp(self_ip, query_ip)) {
+    arpframe.etherheader.src_mac = self_mac;
+    arpframe.src_mac             = self_mac;
+    arpframe.src_ip              = inet_addr(self_ip);
+    arpframe.dst_ip              = inet_addr(query_ip);
+    pcap_sendpacket(adhandle, &arpframe, sizeof(arpframe_t));
+    mac = capmac(adhandle, arpframe.dst_ip);
   }
-
-  if (res == -1) {
-    printf("Error reading the packets: %s\n", pcap_geterr(adhandle));
-    return -1;
-  }
+  printf("\nQueried MAC Address: ");
+  printmac(mac);
+  puts("");
 
   pcap_close(adhandle);
 }
