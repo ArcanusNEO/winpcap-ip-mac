@@ -8,13 +8,27 @@
 #include "pcap.h"
 
 typedef struct {
-  u_char byte[6];
-} mac_t;
+  uint8_t byte[6];
+} __attribute__((packed)) mac_t;
+
 typedef struct {
-  mac_t     daddr;
-  mac_t     saddr;
-  u_int16_t type;
-} etherheader_t;
+  mac_t    daddr;
+  mac_t    saddr;
+  uint16_t type;
+} __attribute__((packed)) etherheader_t;
+
+typedef struct {
+  etherheader_t eth;
+  uint16_t      htype;
+  uint16_t      ptype;
+  uint8_t       maclen;
+  uint8_t       iplen;
+  uint16_t      op;
+  mac_t         src_mac;
+  uint32_t      src_ip;
+  mac_t         dst_mac;
+  uint32_t      dst_ip;
+} __attribute__((packed)) arpframe_t;
 
 signed main(int argc, char* argv[]) {
   static char errbuf[PCAP_ERRBUF_SIZE];
@@ -51,21 +65,12 @@ signed main(int argc, char* argv[]) {
   }
 
   /* Jump to the selected adapter */
-  for (d = alldevs, i = 0; i < inum - 1; d = d->next, i++)
+  for (d = alldevs, i = 0; i < inum - 1; d = d->next, ++i)
     ;
 
   pcap_t* adhandle;
   /* Open the adapter */
-  if ((adhandle =
-         pcap_open_live(d->name,  // name of the device
-                        65536,    // portion of the packet to capture.
-                                  // 65536 grants that the whole packet will be
-                                  // captured on all the MACs.
-                        1,      // promiscuous mode (nonzero means promiscuous)
-                        1000,   // read timeout
-                        errbuf  // error buffer
-                        ))
-      == NULL) {
+  if ((adhandle = pcap_open_live(d->name, 65536, 1, 1000, errbuf)) == NULL) {
     fprintf(stderr,
             "\nUnable to open the adapter. %s is not supported by WinPcap\n",
             d->name);
@@ -81,7 +86,7 @@ signed main(int argc, char* argv[]) {
 
   int                 res;
   struct pcap_pkthdr* header;
-  const u_char*       pkt_data;
+  const uint8_t*      pkt_data;
   /* Retrieve the packets */
   while ((res = pcap_next_ex(adhandle, &header, &pkt_data)) >= 0) {
     if (res == 0) continue; /* Timeout elapsed */
