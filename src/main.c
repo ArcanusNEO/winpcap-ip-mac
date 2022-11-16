@@ -33,7 +33,7 @@ typedef struct {
   uint32_t      dst_ip;
 } __attribute__((packed)) arpframe_t;
 
-mac_t capmac(pcap_t* adhandle, uint32_t src_ip) {
+mac_t capmac(pcap_t* adhandle, uint32_t ip) {
   mac_t ret = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
 
   struct pcap_pkthdr* header;
@@ -45,7 +45,7 @@ mac_t capmac(pcap_t* adhandle, uint32_t src_ip) {
     if (res == 0) continue;  // Timeout elapsed
     arpframe_t* ippacket = pkt_data;
     if (ntohs(ippacket->etherheader.ether_type) == 0x806
-        && ntohs(ippacket->op) == 0x0002 && ippacket->src_ip == src_ip) {
+        && ntohs(ippacket->op) == 0x0002 && ippacket->src_ip == ip) {
       memcpy(&ret, &ippacket->etherheader.src_mac, sizeof(mac_t));
       break;
     }
