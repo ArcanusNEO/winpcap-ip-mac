@@ -78,7 +78,7 @@ signed main(int argc, char* argv[]) {
     else printf(" (N/A) ");
     for (pcap_addr_t* a = d->addresses; a != NULL; a = a->next)
       if (((struct sockaddr_in*) a->addr)->sin_family == AF_INET && a->addr)
-        printf("%c%s", " ("[a == d->addresses],
+        printf("%c%s", a == d->addresses ? '(' : ' ',
                inet_ntoa(((struct sockaddr_in*) a->addr)->sin_addr));
     puts(")");
   }
